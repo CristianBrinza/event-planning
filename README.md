@@ -2,7 +2,14 @@
 
   This platform enables multiple users to collaborate in real-time to plan and manage events efficiently. With features like shared calendars, task assignments, and live updates, it ensures seamless communication and coordination between all participants. The platform leverages WebSockets for instant collaboration and allows each service (such as user management, event scheduling, and task management) to operate independently, ensuring scalability and smooth user experiences even under heavy loads.
 
-  ## Assessing Application Suitability for Microservices
+
+
+## Table of Contents
+
+- [Overview](#overview)
+
+
+  ## Overview
   ### Why Microservices?
 
   Microservices architecture is an ideal choice for real-time, collaborative applications where multiple users need to interact simultaneously while different aspects of the application can be independently scaled. In the case of a real-time collaborative event planning platform, the following advantages make microservices a suitable approach:
@@ -16,71 +23,60 @@
   4.	Real-Time Communication:
     -	The use of WebSockets or other real-time communication methods is essential for real-time updates in event planning. By isolating the real-time communication (e.g., via the EventService), the rest of the system (e.g., notifications or document storage) can operate asynchronously, leading to a responsive user experience.
 
-  ## Service Boundaries
+### Service Boundaries
 
-  1.	Event Service:
-    -	Manages the creation and updates of events, including tasks, milestones, and scheduling changes. It handles all real-time updates and communication via WebSockets to ensure users receive instant updates.
-  2.	User Service:
-    -	Manages user authentication, roles, and permissions. It is responsible for user registration, login, and user-specific data such as profiles, preferences, and event participation details.
-  3.	Notification Service:
-    -	Sends notifications to users based on their interactions with the EventService. It can be decoupled from the real-time updates and handle notifications via emails, push notifications, or in-app alerts asynchronously.
-  4.	API Gateway:
-    -	Acts as the entry point for the platform, handling requests from clients and routing them to the appropriate services (EventService, UserService, NotificationService). The gateway also manages WebSocket connections and ensures requests are properly authenticated and authorized.
+1. **Event and Task Management Service (Multiple Instances)**
+   - Handles event creation, updates, task assignments, and real-time collaboration.
+   - Manages WebSocket connections for instant updates.
+   - Utilizes Redis Queue for task distribution and load balancing.
+
+2. **User, Notification, and Calendar Service**
+   - Manages user authentication, profiles, and permissions.
+   - Handles notifications via email, push notifications, or in-app alerts.
+   - Integrates with third-party calendar APIs for syncing events.
+
+3. **API Gateway**
+   - Acts as the entry point for all clients.
+   - Routes requests to the appropriate services.
+   - Manages WebSocket connections and ensures proper authentication and authorization.
+
 
   ```mermaid
- graph TD
-    %% User Interaction
-    A[User] -->|REST, WebSocket| B[API Gateway]
+flowchart TD
+  subgraph Event_and_Task_Management_Service_Replicas
+    E1["Event & Task Management Service"]
+    E2["Event & Task Management Service"]
+    E3["Event & Task Management Service"]
+  end
 
-    %% API Gateway Routes
-    B -->|REST, WebSocket| C[Event Service - multiple instances]
-    B -->|REST| D[User Service]
-    B -->|REST| E[Notification Service]
-    B -->|REST| O[Task Management Service - multiple instances]
-    
-    %% Event Service
-    C --> F[(Event DB)]
-    C --> G[Real-Time Collaboration Engine]
-    C --> X[Task Execution Service - multiple instances]
+  subgraph User_Notification_Calendar_Service
+    U["User, Notification & Calendar Service"]
+  end
 
-    %% User Service
-    D --> H[(User DB)]
-    
-    %% Notification Service
-    E --> I[(Notification Logs DB)]
-    E --> J[Push Notifications]
-    E --> K[Email Notifications]
-    
-    %% Task Management
-    O --> Z[(Task Management DB)]
-    
-    %% External API Integration
-    B -->|REST| L[Third-Party Calendar API]
-    
-    %% Cache for Optimized Requests
-    B --> M[(Redis Cache)]
+  A["User"] -- REST, WebSocket --> E1 & E2 & E3
+  A -- REST --> B["API Gateway"]
+  
+  B -- gRPC --> U
+  E1 & E2 & E3 -- publish/subscribe --> C[("Redis Queue")]
+  E1 & E2 & E3 -- read/write --> D[("Event & Task DB")]
+  U -- read/write --> F[("User DB")]
+  B -- gRPC --> G["Service Discovery"]
+  C -- message --> E1 & E2 & E3
+  B:::gateway
+  E1:::service
+  E2:::service
+  E3:::service
+  U:::service
+  C:::queue
+  D:::database
+  F:::database
+  G:::service
 
-    %% Service Discovery
-    B -->|Health Check| N[Service Discovery]
-    
-    %% Worker Management
-    X --> Y[Worker Node]
-    X --> P[(Task Queue)]
+  classDef service stroke:#333,stroke-width:2px
+  classDef database stroke:#333,stroke-width:2px
+  classDef gateway stroke:#333,stroke-width:4px
+  classDef queue stroke:#333,stroke-width:2px
 
-    %% Databases and Caches
-    F:::database
-    H:::database
-    I:::database
-    Z:::database
-    M:::database
-    N:::service
-    P:::queue
-    Y:::worker
-    classDef database stroke:#333,stroke-width:2px
-    classDef queue stroke:#333,stroke-width:2px
-    classDef worker stroke:#333,stroke-width:2px
-    classDef service stroke:#333,stroke-width:2px
-      
   ```
 
   ## Technology Stack and Communication Patterns
@@ -143,10 +139,12 @@
       
   ```
       {
-    "event_name": "Project Kickoff",
-    "date": "2024-10-10",
-    "participants": ["user123", "user456"]
-  }
+
+  "event_name": "Project Kickoff",
+  "date": "2024-10-10",
+  "participants": ["user123", "user456"]
+}
+
   ```
 
   - Output:
@@ -182,61 +180,160 @@
 
   ```
   [
-    {
-      "event_id": "event123",
-      "event_name": "Team Meeting",
-      "date": "2024-09-15"
+  {
+    "event_id": "event123",
+    "event_name": "Team Meeting",
+    "date": "2024-09-15"
+  },
+  {
+    "event_id": "event789",
+    "event_name": "Project Kickoff",
+    "date": "2024-11-11"
+  }
+]
+
+```
+
+### WebSocket Collaboration
+
+- WebSocket Endpoint: /ws/events
+- Users can subscribe to event changes in real-time.
+- Client Message Example:
+```
+{
+  "type": "subscribe",
+  "payload": {
+    "event_id": "event789"
+  }
+}
+```
+
+
+Server Update Example:
+```
+Copy code
+{
+  "type": "update",
+  "payload": {
+    "event_id": "event789",
+    "new_data": {
+      "status": "completed"
     },
-    {
-      "event_id": "event789",
-      "event_name": "Project Kickoff",
-      "date": "2024-11-11"
-    }
-  ]
-  ```
-  ### User Service
-
-  1.	POST /user/register
-  Register a new user.
-  -	Input:
-
-  ```
-  {
-    "username": "newuser",
-    "password": "securepassword"
+    "timestamp": 1234567890
   }
-  ```
+}
+```
 
+### User, Notification & Calendar Service
+POST /user/register
 
-  - Output:
+- Register a new user.
+- Input:
+```
+{
+  "username": "newuser",
+  "password": "securepassword"
+}
+```
 
-  ```
-  {
-    "user_id": "user789",
-    "status": "registered"
-  }
-  ```
+- Output:
 
-  2.	POST /user/login
-  Log in an existing user.
-  -	Input:
+```
+{
+  "user_id": "user789",
+  "status": "registered"
+}
+POST /user/login
 
-  ```
-  {
-    "username": "newuser",
-    "password": "securepassword"
-  }
-  ```
+```
 
+Log in an existing user.
 
-  -	Output:
-  ```
-  {
-    "token": "jwt-token"
-  }
-  ```
+- Input:
+```
+{
+  "username": "newuser",
+  "password": "securepassword"
+}
+```
 
-  ### Service Discovery integration:
+- Output:
+
+```
+{
+  "token": "jwt-token"
+}
+
+```
+
+POST /notifications/send
+
+Send a notification to users.
+- Input:
+
+```
+{
+  "user_id": "user123",
+  "message": "Event Reminder: Project Kickoff tomorrow."
+}
+```
+- Output:
+
+```
+{
+  "status": "sent",
+  "notification_id": "notif789"
+}
+```
+
+### Calendar Integration (via API Gateway)
+
+- The calendar sync service interacts with third-party calendar APIs through the API Gateway.
+- It allows users to sync their events across multiple platforms.
+- Service Discovery Integration
+- The Event & Task Management Service and User, Notification & Calendar Service register and deregister with the Service Discovery system (e.g., Consul) for dynamic routing.
+- Example Service Discovery information:
+
+```
+{
+  "service": "Event & Task Management Service",
+  "address": "10.0.0.1",
+  "port": 8080,
+  "status": "active"
+}
+```
+
+### API Gateway Role
+- The API Gateway is responsible for handling external requests to services like the User, Notification & Calendar Service.
+- It interacts with the Service Discovery system to locate and communicate with active service instances.
+- Example API Gateway Interaction:
+
+When a request like GET /events/list comes in, the API Gateway queries the Service Discovery system to fetch the active address of the Event & Task Management Service before routing the request.
+
+```
+{
+  "service": "Event & Task Management Service",
+  "address": "10.0.0.1",
+  "port": 8080,
+  "status": "active"
+}
+```
+
+### Summary of Key Endpoints
+
+- Event & Task Management Service
+  - POST /events/create
+  - POST /events/update
+  - GET /events/list
+- WebSocket: /ws/events
+  - User, Notification & Calendar Service
+  - POST /user/register
+  - POST /user/login
+  - POST /notifications/send
+- API Gateway
+  - Handles user, notification, and calendar services via REST and gRPC.
+
+### Service Discovery integration:
 
   - Each service (Event Service, User Service, Notification Service) needs to register and deregister with the Service Discovery tool.
   - 	Example API Gateway interaction:
@@ -309,8 +406,8 @@
   The platform uses Docker to containerize each microservice, ensuring portability and consistent deployment across environments. The services are managed via Docker Compose, enabling both vertical and horizontal scaling.
 
   1.	Containerization: Each service is containerized using Docker to ensure consistency across different environments. Each service in the platform is containerized using Docker to ensure consistent deployment across different environments, enabling the application to run smoothly in diverse infrastructure settings.
-  2.	Orchestration: Kubernetes is used to orchestrate and manage the deployment, scaling, and monitoring of the services. The platform leverages Kubernetes to orchestrate these containers, managing the deployment, scaling, and monitoring of services. Kubernetes ensures that containers are dynamically allocated based on resource demand, improving resource utilization and availability.
-  3.	Scaling: The EventService is expected to be the most heavily used, so it is set up with horizontal scaling using Kubernetes. Each service can scale independently, with EventService replicas dynamically adjusting based on WebSocket connections.
+  2.	Orchestration: Docker is used to orchestrate and manage the deployment, scaling, and monitoring of the services. The platform leverages Docker to orchestrate these containers, managing the deployment, scaling, and monitoring of services. Docker ensures that containers are dynamically allocated based on resource demand, improving resource utilization and availability.
+  3.	Scaling: The EventService is expected to be the most heavily used, so it is set up with horizontal scaling using Dokr. Each service can scale independently, with EventService replicas dynamically adjusting based on WebSocket connections.
 
 
   Each service has its own Dockerfile. For example, for the Event Service:
@@ -348,13 +445,33 @@
 
   1.	Lobby Mechanism (WebSocket):
     -	The EventService provides a lobby mechanic where users can join an event planning session in real time, collaborating on tasks, updates, and changes through WebSockets.
-  2.	API Consumption:
+
+- Implemented within the Event & Task Management Service. <br>
+- Allows users to join a lobby for collaborative planning sessions.<br>
+- Manages user presence and real-time updates within the lobby.<br>
+2.	API Consumption:
     -	The Notification Service consumes a third-party API, such as Twilio, to send SMS notifications to users for critical updates (in addition to in-app notifications).
-  3.	Service Discovery:
-    -	A service discovery mechanism is implemented using Consul to allow services to discover each other dynamically and facilitate load balancing.
+- Utilizes Consul for dynamic service discovery.<br>
+- Ensures that services can locate each other without hardcoded endpoints.<br>
+- Facilitates load balancing and fault tolerance.
+
+3.	Service Discovery:
+-	A service discovery mechanism is implemented using Consul to allow services to discover each other dynamically and facilitate load balancing.
+
+4. Redis Queue
+- Used for distributing tasks among multiple instances of the Event & Task Management Service.<br>
+- Enhances scalability by balancing the workload.<br>
+- Ensures that tasks are processed efficiently even under heavy load.<br>
+    
+
     
   -  Scalability: By integrating Service Discovery, each microservice can now scale independently without requiring manual intervention in the API Gateway.
-  - 	Fault Tolerance: If a service goes down, the Service Discovery will automatically update the status, and the API Gateway will stop routing requests to that instance.
+
+  - Fault Tolerance: If a service goes down, the Service Discovery will automatically update the status, and the API Gateway will stop routing requests to that instance.
+
+
+
+
 
   ## Architecture Diagram
 
@@ -373,18 +490,171 @@
 - Event Service: This service experiences high demand due to real-time collaboration. Horizontal scaling is implemented to ensure that additional instances can be spun up as the number of WebSocket connections increases.
 - 	User Service: This service handles user authentication and profiles. It will scale based on login and registration requests, ensuring quick responses during peak usage times (e.g., event start times).
 - 	Notification Service: Scales based on queue length for asynchronous tasks, such as sending notifications. Worker nodes can be added or removed dynamically based on the message queue load.
-- 	API Gateway: Kubernetes ensures the API Gateway can scale horizontally to handle increasing client requests. As the entry point for all REST and WebSocket communications, it ensures balanced load distribution across services.
+- 	API Gateway: Doker ensures the API Gateway can scale horizontally to handle increasing client requests. As the entry point for all REST and WebSocket communications, it ensures balanced load distribution across services.
 
 ### Load Balancing:
- A Kubernetes Ingress Controller or a dedicated load balancer (e.g., NGINX) distributes incoming requests across the various service instances to ensure optimal load distribution and reduce service response time.
+ A Doker Ingress Controller or a dedicated load balancer (e.g., NGINX) distributes incoming requests across the various service instances to ensure optimal load distribution and reduce service response time.
 
 ### Fault Tolerance: 
-Kubernetes handles service failures gracefully, restarting failed pods and rebalancing loads to ensure minimal downtime. Service Discovery will ensure that only healthy instances are used.
+1.	Service Restarts:
+Docker Compose allows you to automatically restart services in case of failures by using the restart policy. This ensures that if a service fails, Docker will restart it automatically.
+2.	Health Checks:
+Docker Compose supports health checks that continuously monitor the health of a service. If a service becomes unhealthy, it can be restarted or trigger some other action.
+3.	Service Discovery:
+Consul for service discovery in Docker Compose to ensure that only healthy service instances are used. This allows services to discover each other dynamically and avoid routing requests to failed or unhealthy services.
+
+```
+version: '3.8'
+
+services:
+  api-gateway:
+    image: api-gateway:latest
+    restart: always
+    depends_on:
+      - event-task-service
+      - user-notification-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "3000:3000"
+
+  event-task-service:
+    image: event-task-service:latest
+    restart: always
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "3001:3001"
+
+  user-notification-service:
+    image: user-notification-service:latest
+    restart: always
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "3002:3002"
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    restart: always
+
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_PASSWORD: yourpassword
+    ports:
+      - "5432:5432"
+    restart: always
+
+  consul:
+    image: consul
+    command: agent -dev -client=0.0.0.0
+    ports:
+      - "8500:8500"  # Consul UI
+      - "8600:8600"  # DNS
+    restart: always
+
+networks:
+  default:
+    driver: bridge
+
+```
 
 ### Service Discovery and Worker Distribution: 
-A service discovery mechanism (such as Consul) allows services to discover each other dynamically. Workers (particularly in the Notification Service) are distributed across multiple nodes in the Kubernetes cluster, ensuring efficient resource utilization and fault tolerance. Kubernetes’ autoscaling ensures that additional worker instances are deployed as the task queue grows, improving scalability during high-demand periods.
+1.	Service Discovery with Consul:
+	-	Consul will be used for service discovery, allowing services to register themselves and discover each other dynamically. This ensures that only healthy services are used for communication, similar to how Doker handles service discovery.
+2.	Worker Distribution:
+	-	Docker Compose allows you to scale services by running multiple instances of a service (such as the Notification Service workers) using the docker-compose up --scale command.
+	-	Workers can be distributed across multiple instances, and as the task queue grows, more worker instances can be manually scaled up to handle the increased load.
 
+Example Docker Compose for Service Discovery and Worker Distribution:
 
+```
+version: '3.8'
+
+services:
+  api-gateway:
+    image: api-gateway:latest
+    restart: always
+    depends_on:
+      - event-task-service
+      - notification-worker
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    environment:
+      - CONSUL_HTTP_ADDR=consul:8500
+    command: ["register-service", "api-gateway"]
+    ports:
+      - "3000:3000"
+
+  event-task-service:
+    image: event-task-service:latest
+    restart: always
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    environment:
+      - CONSUL_HTTP_ADDR=consul:8500
+    command: ["register-service", "event-task-service"]
+    ports:
+      - "3001:3001"
+
+  notification-worker:
+    image: notification-worker:latest
+    restart: always
+    depends_on:
+      - redis
+    environment:
+      - CONSUL_HTTP_ADDR=consul:8500
+    command: ["register-service", "notification-worker"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "3002:3002"
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    restart: always
+
+  consul:
+    image: consul
+    command: agent -dev -client=0.0.0.0
+    ports:
+      - "8500:8500"  # Consul UI
+      - "8600:8600"  # DNS
+    restart: always
+
+networks:
+  default:
+    driver: bridge
+```
 
   ## Conclusion
 
@@ -408,7 +678,7 @@ A service discovery mechanism (such as Consul) allows services to discover each 
 
 - [Building Collaborative Applications with WebSockets](https://dev.to/someone/building-collaborative-applications-with-websockets)
 - [Best Practices for Microservices in Real-Time Applications](https://real-time-microservices.dev.io/)
-- [Scaling Microservices with Kubernetes](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+ - [Scaling Services with Docker Compose](https://docs.docker.com/compose/compose-file/compose-file-v3/#scale)
 - [The Role of Service Discovery in Microservice Architectures](https://blog.service-discovery-in-microservices.com)
 - [Using Redis for Caching in High-Traffic Applications](https://redis.io/topics/caching)
-- [Deploying Microservices Using Docker and Kubernetes](https://medium.com/@user/deploying-microservices-using-docker-and-kubernetes)
+ - [Deploying Microservices Using Docker and Docker Compose](https://medium.com/@user/deploying-microservices-using-docker-and-Docker)
