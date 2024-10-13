@@ -56,6 +56,9 @@ flowchart TD
   A["User"] -- REST, WebSocket --> E1 & E2 & E3
   A -- REST --> B["API Gateway"]
   
+  %% Added new path from API Gateway to Event & Task Management Service
+  B -- REST --> E1 & E2 & E3
+  
   B -- gRPC --> U
   E1 & E2 & E3 -- publish/subscribe --> C[("Redis Queue")]
   E1 & E2 & E3 -- read/write --> D[("Event & Task DB")]
@@ -196,7 +199,7 @@ flowchart TD
 
 ### WebSocket Collaboration
 
-- WebSocket Endpoint: /ws/events
+- WebSocket Endpoint: /ws/events/event_id
 - Users can subscribe to event changes in real-time.
 - Client Message Example:
 ```
@@ -407,7 +410,7 @@ When a request like GET /events/list comes in, the API Gateway queries the Servi
 
   1.	Containerization: Each service is containerized using Docker to ensure consistency across different environments. Each service in the platform is containerized using Docker to ensure consistent deployment across different environments, enabling the application to run smoothly in diverse infrastructure settings.
   2.	Orchestration: Docker is used to orchestrate and manage the deployment, scaling, and monitoring of the services. The platform leverages Docker to orchestrate these containers, managing the deployment, scaling, and monitoring of services. Docker ensures that containers are dynamically allocated based on resource demand, improving resource utilization and availability.
-  3.	Scaling: The EventService is expected to be the most heavily used, so it is set up with horizontal scaling using Dokr. Each service can scale independently, with EventService replicas dynamically adjusting based on WebSocket connections.
+  3.	Scaling: The EventService is expected to be the most heavily used, so it is set up with horizontal scaling using Docker. Each service can scale independently, with EventService replicas dynamically adjusting based on WebSocket connections.
 
 
   Each service has its own Dockerfile. For example, for the Event Service:
@@ -492,8 +495,7 @@ When a request like GET /events/list comes in, the API Gateway queries the Servi
 - 	Notification Service: Scales based on queue length for asynchronous tasks, such as sending notifications. Worker nodes can be added or removed dynamically based on the message queue load.
 - 	API Gateway: Doker ensures the API Gateway can scale horizontally to handle increasing client requests. As the entry point for all REST and WebSocket communications, it ensures balanced load distribution across services.
 
-### Load Balancing:
- A Doker Ingress Controller or a dedicated load balancer (e.g., NGINX) distributes incoming requests across the various service instances to ensure optimal load distribution and reduce service response time.
+
 
 ### Fault Tolerance: 
 1.	Service Restarts:
